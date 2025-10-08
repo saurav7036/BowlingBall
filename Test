@@ -1,0 +1,52 @@
+using System;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.Serialization;
+using Nest;
+
+public static class ElasticTestHelper
+{
+    public static KeyedBucket<string> CreateKeyedBucket(string key, long docCount = 0)
+    {
+        // Create instance without invoking constructor
+        var bucket = (KeyedBucket<string>)FormatterServices.GetUninitializedObject(typeof(KeyedBucket<string>));
+        var type = typeof(KeyedBucket<string>);
+
+        // Try set public property if present
+        var keyProp = type.GetProperty("Key", BindingFlags.Public | BindingFlags.Instance);
+        if (keyProp != null && keyProp.CanWrite)
+            keyProp.SetValue(bucket, key);
+        else
+        {
+            var backing = type.GetField("<Key>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (backing != null) backing.SetValue(bucket, key);
+            else
+            {
+                var maybe = type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+                                .FirstOrDefault(f => f.Name.IndexOf("key", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (maybe != null) maybe.SetValue(bucket, key);
+            }
+        }
+
+        // Set DocCount backing (nullable long likely)
+        var docProp = type.GetProperty("DocCount", BindingFlags.Public | BindingFlags.Instance);
+        if (docProp != null && docProp.CanWrite)
+            docProp.SetValue(bucket, Convert.ChangeType(docCount, Nullable.GetUnderlyingType(docProp.PropertyType) ?? docProp.PropertyType));
+        else
+        {
+            var backingDoc = type.GetField("<DocCount>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (backingDoc != null)
+            {
+                var targetType = backingDoc.FieldType;
+                object valueToSet = docCount;
+                if (Nullable.GetUnderlyingType(targetType) != null)
+                    valueToSet = Activator.CreateInstance(typeof(Nullable<>).MakeGenericType(typeof(long)), new object[] { docCount });
+                else valueToSet = Convert.ChangeType(docCount, targetType);
+
+                backingDoc.SetValue(bucket, valueToSet);
+            }
+        }
+
+        return bucket;
+    }
+}
